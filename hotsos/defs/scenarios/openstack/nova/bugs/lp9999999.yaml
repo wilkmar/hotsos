@@ -1,0 +1,14 @@
+checks:
+  has_9999999:
+    input:
+      path: 'var/log/nova/nova-compute.log'
+    expr: '([\d-]+) ([\d:]+)\.\d{3,6} .+USB tablet requested for guests but the SPICE agent is enabled'
+conclusions:
+  lp9999999:
+    decision: has_9999999
+    raises:
+      type: LaunchpadBug
+      bug-id: 9999999
+      message: >-
+        This host is affected by a known nova bug that causes flooding the
+        nova-compute logs with the USB tablet requests.

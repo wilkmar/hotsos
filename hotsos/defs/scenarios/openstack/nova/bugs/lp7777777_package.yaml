@@ -1,0 +1,23 @@
+checks:
+  has_7777777:
+    input:
+      path: 'var/log/nova/nova-compute.log'
+    expr: '([\d-]+) ([\d:]+)\.\d{3,6} .+USB tablet requested for guests but the SPICE agent is enabled'
+  package_affected:
+    apt:
+      nova-common:
+        - lt: 3:29.2.0-0ubuntu1.5
+conclusions:
+  lp7777777:
+    decision:
+      - has_7777777
+      - package_affected
+    raises:
+      type: LaunchpadBug
+      bug-id: 7777777
+      message: >-
+        This host has nova-common version {version} which is affected by
+        a known nova bug that causes flooding the nova-compute logs with the
+        USB tablet requests
+      format-dict:
+        version: '@checks.package_affected.requires.version'

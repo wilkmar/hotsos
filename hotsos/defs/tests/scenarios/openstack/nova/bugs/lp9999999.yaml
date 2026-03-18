@@ -1,0 +1,14 @@
+data-root:
+  files:
+    var/log/nova/nova-compute.log: |
+        2026-03-17 23:51:19.401 1101464 DEBUG oslo_messaging._drivers.amqpdriver [-] received reply msg_id: d13a605ce21b4d5a94e8e5daf77a5009 __call__ /usr/lib/python3/dist-packages/oslo_messaging/_drivers/amqpdriver.py:516
+        2026-03-17 23:51:19.402 1101464 DEBUG nova.compute.manager [None req-00bcaead-e5b3-4508-9b58-281de0636b5c - - - - - -] [instance: f1a48bc7-0100-4cd5-ab75-b25e395ec1ef] Checking state _get_power_state /usr/lib/python3/dist-packages/nova/compute/manager.py:1782
+        2026-03-17 23:51:19.412 1101464 WARNING nova.virt.libvirt.driver [None req-e981b0f8-d699-41be-852e-ac77f194979a d1c206dbd7b64e3eacefc738fd9acdca c20da633fc2e44cd97ff31be0acd959a - - default default] USB tablet requested for guests but the SPICE agent is enabled; ignoring request in favour of default configuration.
+        2026-03-17 23:52:19.412 1101464 DEBUG nova.virt.libvirt.driver [None req-e981b0f8-d699-41be-852e-ac77f194979a d1c206dbd7b64e3eacefc738fd9acdca c20da633fc2e44cd97ff31be0acd959a - - default default] [instance: f1a48bc7-0100-4cd5-ab75-b25e395ec1ef] Found default for hw_input_bus of None _register_undefined_instance_details /usr/lib/python3/dist-packages/nova/virt/libvirt/driver.py:952
+        2026-03-17 23:55:19.412 1101464 WARNING nova.virt.libvirt.driver [None req-e981b0f8-d699-41be-852e-ac77f194979a d1c206dbd7b64e3eacefc738fd9acdca c20da633fc2e44cd97ff31be0acd959a - - default default] USB tablet requested for guests but the SPICE agent is enabled; ignoring request in favour of default configuration.
+  copy-from-original:
+    - sos_commands/date/date
+raised-bugs:
+  https://bugs.launchpad.net/bugs/9999999: >-
+    This host is affected by a known nova bug that causes flooding the
+    nova-compute logs with the USB tablet requests.

@@ -1,0 +1,23 @@
+checks:
+  has_8888888:
+    input:
+      path: 'var/log/nova/nova-compute.log'
+    search:
+      expr: '([\d-]+) ([\d:]+)\.\d{3,6} .+USB tablet requested for guests but the SPICE agent is enabled'
+      hint: 'WARNING nova.virt.libvirt.driver'
+      constraints:
+        min-results: 2
+        search-period-hours: 1
+        search-result-age-hours: 10
+conclusions:
+  lp8888888:
+    decision: has_8888888
+    raises:
+      type: LaunchpadBug
+      bug-id: 8888888
+      message: >-
+        Found {count} occurrences of a known nova bug that causes flooding the
+        nova-compute logs with the USB tablet requests. This is likely to be
+        a recent issue as the search is limited to the last 10 hours.
+      format-dict:
+        count: '@checks.has_8888888.search.num_results'
