@@ -12,6 +12,7 @@ data-root:
       Mar 24 08:00:27 testnode02 nova-compute[3334105]: greenlet.error: cannot switch to a different thread
   copy-from-original:
     - sos_commands/date/date
+    - sos_commands/dpkg/dpkg_-l
 raised-bugs:
   https://bugs.launchpad.net/bugs/1934937: >-
    One or more service(s) on this host are affected by this bug which is

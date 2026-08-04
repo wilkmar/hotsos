@@ -149,11 +149,13 @@ class CephConfig(IniConfigBase):
     @property
     @csv_to_set
     def cluster_network_set(self):
+        """ Return cluster network addresses as a set. """
         return self.get('cluster network')
 
     @property
     @csv_to_set
     def public_network_set(self):
+        """ Return public network addresses as a set. """
         return self.get('public network')
 
 
@@ -177,6 +179,12 @@ class CephInstallInfo(InstallInfoBase):
 
 class CephChecks(StorageBase):
     """ Ceph Checks. """
+    # Threshold above which an OSD's bluefs log is considered oversized.
+    # Healthy OSDs keep this well under 50 GiB; sustained growth past this
+    # point indicates that bluefs log compaction has failed and the log is
+    # consuming DB/WAL/main device space.
+    BLUEFS_LOG_SIZE_LIMIT = 50 * 1024 * 1024 * 1024
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ceph_config = CephConfig()
@@ -337,7 +345,104 @@ class CephChecks(StorageBase):
 
     @cached_property
     def local_osds_devtypes(self):
+        """ Return device types for all local OSDs. """
         return [osd.devtype for osd in self.local_osds]
+
+    @staticmethod
+    def _is_zero_config_value(value):
+        try:
+            return int(value) == 0
+        except (TypeError, ValueError):
+            return False
+
+    @cached_property
+    def _mds_bal_interval_is_zero(self):
+        """
+        Returns True if mds_bal_interval is explicitly set to 0, which
+        disables the balancer on all releases.
+        """
+        mds_values = []
+        global_values = []
+        for item in self.cluster.ceph_config_dump:
+            if item.get('name') != 'mds_bal_interval':
+                continue
+
+            section = item.get('section')
+            if section == 'mds':
+                mds_values.append(item.get('value'))
+            elif section == 'global':
+                global_values.append(item.get('value'))
+
+        values = mds_values or global_values
+        if values:
+            return all(self._is_zero_config_value(value) for value in values)
+
+        conf_value = self.ceph_config.get('mds_bal_interval')
+        if conf_value is not None:
+            return self._is_zero_config_value(conf_value)
+
+        return False
+
+    @staticmethod
+    def _fs_balance_automate(filesystem):
+        """
+        Returns the balance_automate flag for a filesystem, or None if the
+        flag is not present (releases before reef do not expose it).
+        """
+        flags_state = (filesystem or {}).get('mdsmap', {}).get('flags_state',
+                                                               {})
+        return flags_state.get('balance_automate')
+
+    @cached_property
+    def mds_balancer_disabled(self):
+        """
+        Returns True if the CephFS MDS balancer is disabled.
+
+        The balancer can be turned off cluster-wide by setting
+        mds_bal_interval to 0 (all releases), or per-filesystem via the
+        balance_automate flag which reef and later expose and disable by
+        default.
+        """
+        if self._mds_bal_interval_is_zero:
+            return True
+
+        report = self.cluster.crush_map.ceph_report
+        filesystems = report.get('fsmap', {}).get('filesystems') or []
+        automate = [self._fs_balance_automate(fs) for fs in filesystems]
+        if automate and all(state is False for state in automate):
+            return True
+
+        return False
+
+    @cached_property
+    def local_osds_with_oversized_bluefs_log(self):
+        """
+        Returns names of local OSDs whose bluefs log has grown beyond
+        BLUEFS_LOG_SIZE_LIMIT.
+
+        Sustained growth past this size indicates that bluestore failed
+        to invoke log compaction so the log is consuming DB/WAL/main
+        device space which can eventually crash the OSD.
+        """
+        bad = []
+        for osd in self.local_osds:
+            try:
+                bluefs = CephDaemonPerfDump(osd_id=osd.id).bluefs
+            except Exception:  # pylint: disable=broad-except
+                continue
+
+            if not bluefs:
+                continue
+
+            try:
+                log_bytes = int(bluefs.get('log_bytes', 0))
+            except (TypeError, ValueError):
+                continue
+
+            if log_bytes > self.BLUEFS_LOG_SIZE_LIMIT:
+                bad.append(f'osd.{osd.id}')
+
+        return sorted(bad)
 
     @cached_property
     def bluestore_enabled(self):
@@ -439,6 +544,22 @@ class CephDaemonDumpMemPools():
             return val.get('by_pool', {}).get(name, {}).get('items')
 
         return None
+
+
+class CephDaemonPerfDump():
+    """ Interface to ceph daemon osd perf dump. """
+    def __init__(self, osd_id):
+        self.osd_id = osd_id
+        self.cmd = CephDaemonCommand('ceph_daemon_osd_perf_dump',
+                                     osd_id=osd_id)
+
+    @property
+    def bluefs(self):
+        """ Return bluefs perf data dict or empty dict. """
+        try:
+            return getattr(self.cmd, 'bluefs') or {}
+        except AttributeError:
+            return {}
 
 
 class CephDaemonAllOSDsCommand():

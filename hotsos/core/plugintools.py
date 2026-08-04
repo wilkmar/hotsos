@@ -4,7 +4,6 @@ from enum import IntEnum, auto
 from dataclasses import dataclass
 
 import yaml
-from jinja2 import FileSystemLoader, Environment
 from hotsos.core.config import HotSOSConfig
 from hotsos.core.issues import IssuesManager
 from hotsos.core.log import log
@@ -14,6 +13,7 @@ from hotsos.core.ycheck.common import GlobalSearcher
 from hotsos.core.ycheck.events import EventsSearchPreloader
 from hotsos.core.ycheck.scenarios import ScenariosSearchPreloader
 from hotsos.core.exceptions import NameNotSetError
+from hotsos.core.formatters.common import HOTSOSDumper
 
 PLUGINS = {}
 PLUGIN_RUN_ORDER = []
@@ -66,110 +66,9 @@ class PluginRegistryMeta(type):
                                                  'runner': subcls})
 
 
-class HOTSOSDumper(yaml.Dumper):  # pylint: disable=too-many-ancestors
-    """ Custom yaml dumper that preserves order. """
-    def increase_indent(self, flow=False, indentless=False):
-        return super().increase_indent(flow, False)
-
-    def represent_dict_preserve_order(self, data):
-        return self.represent_dict(data.items())
-
-
 def get_plugins_sorted():
     """ Return list of plugin names in the order they are to be run. """
     return [e[0] for e in sorted(PLUGIN_RUN_ORDER, key=lambda e: e[1])]
-
-
-def yaml_dump(data):
-    """
-    This is our version of yaml.dump but ensuring the format/style that we
-    want.
-    """
-    HOTSOSDumper.add_representer(
-        dict,
-        HOTSOSDumper.represent_dict_preserve_order)
-    return yaml.dump(data, Dumper=HOTSOSDumper,
-                     default_flow_style=False).rstrip("\n")
-
-
-class HTMLFormatter:
-    """
-    Format the summary as html.
-
-    Ref: https://iamkate.com/code/tree-views/
-    """
-
-    def __init__(self, hostname, max_level=2):
-        """
-        @param max_level: The HTML will be collapsible up to max_level
-        """
-        self.hostname = hostname
-        self.max_level = max_level
-
-    @staticmethod
-    def render(context, template):
-        # jinja 2.10.x really needs this to be a str and e.g. not a PosixPath
-        templates_dir = str(HotSOSConfig.templates_path)
-        if not os.path.isdir(templates_dir):
-            raise FileNotFoundError(
-                f"jinja templates directory not found: '{templates_dir}'")
-
-        env = Environment(loader=FileSystemLoader(templates_dir))
-        template = env.get_template(template)
-        return template.render(context)
-
-    @property
-    def header(self):
-        return self.render({'hostname': self.hostname}, 'header.html')
-
-    @property
-    def footer(self):
-        with open(os.path.join(HotSOSConfig.templates_path,
-                               'footer.html'), encoding='utf-8') as fd:
-            return fd.read()
-
-    def _expand_list(self, data, level):
-        context = {'list_elements': [], 'indent': '    '}
-        for item in data:
-            context['list_elements'].append(self._expand(item, level))
-
-        return self.render(context, 'content_list.html')
-
-    def _expand_dict(self, data, level):
-        context = {'dict_elements': {},
-                   'indent': '    ',
-                   'collapsible': level < self.max_level}
-        if level == 1:
-            context['class'] = 'class="tree"'
-
-        for key, value in data.items():
-            context['dict_elements'][key] = self._expand(value, level + 1)
-
-        return self.render(context, 'content_dict.html')
-
-    def _expand(self, data, level):
-        """Expand the data object.
-
-        @param data: The data object. This can be a dict, list, or a flat type
-                     such as int or str.
-        @param level: The current header level
-        @return: A string expansion formatted in HTML of the data object.
-        """
-        if isinstance(data, dict):
-            return self._expand_dict(data, level)
-        if isinstance(data, list):
-            return self._expand_list(data, level)
-
-        return data
-
-    def dump(self, data):
-        """Convert the data (dict) into an html document.
-
-        @param dist: The data
-        @return: the html document as a string.
-        """
-        content = self._expand(data, 1)
-        return self.header + content + self.footer
 
 
 class MarkdownFormatter:
@@ -307,15 +206,18 @@ class ApplicationSummaryBase(metaclass=PluginRegistryMeta):
 
     @classmethod
     def default_summary_entries(cls):
+        """Return names of base class summary entry methods."""
         return [e for e in dir(ApplicationSummaryBase)
                 if str(e).startswith('summary_')]
 
     @summary_entry('version', DefaultSummaryEntryIndexes.VERSION)
     def summary_version(self):
+        """Return application version for the summary."""
         return self.version
 
     @summary_entry('release', DefaultSummaryEntryIndexes.RELEASE)
     def summary_release(self):
+        """Return release name and days to EOL."""
         if not all([self.release_name is not None,
                     self.days_to_eol is not None]):
             return None
@@ -336,6 +238,7 @@ class ApplicationSummaryBase(metaclass=PluginRegistryMeta):
 
     @summary_entry('snaps', DefaultSummaryEntryIndexes.SNAPS)
     def summary_snaps(self):
+        """Return formatted snap package info."""
         if self.snaps is None:
             return None
 
@@ -343,6 +246,7 @@ class ApplicationSummaryBase(metaclass=PluginRegistryMeta):
 
     @summary_entry('dpkg', DefaultSummaryEntryIndexes.DPKG)
     def summary_dpkg(self):
+        """Return formatted dpkg package info."""
         # require at least one core package to be installed to include
         # this in the report.
         if self.apt is not None and self.apt.core:
@@ -352,6 +256,7 @@ class ApplicationSummaryBase(metaclass=PluginRegistryMeta):
 
     @summary_entry('docker-images', DefaultSummaryEntryIndexes.DOCKER_IMAGES)
     def summary_docker_images(self):
+        """Return formatted docker image info."""
         if self.docker is None:
             return None
 
@@ -401,6 +306,7 @@ class PartOutputManager():
 
     @property
     def indexes(self):
+        """Load and return part output index from YAML."""
         path = os.path.join(HotSOSConfig.plugin_tmp_dir, "index.yaml")
         if os.path.exists(path):
             with open(path, encoding='utf-8') as fd:
@@ -409,6 +315,7 @@ class PartOutputManager():
         return {}
 
     def add_to_index(self, index, part):
+        """Add a part file path to the index at the given key."""
         indexes = self.indexes
         path = os.path.join(HotSOSConfig.plugin_tmp_dir, "index.yaml")
         with open(path, 'w', encoding='utf-8') as fd:
@@ -439,6 +346,7 @@ class PartOutputManager():
         existing.update(data)
 
     def all(self):
+        """Aggregate all indexed part outputs into one dict."""
         if not self.indexes:
             return {}
 
@@ -569,6 +477,7 @@ class PluginPartBase(ApplicationSummaryBase):
 
     @property
     def output(self):
+        """Collect all summary entries as SummaryEntry objects."""
         _output = {}
         if self.summary:
             for key, data in self.summary.items():
@@ -594,6 +503,7 @@ class PluginPartBase(ApplicationSummaryBase):
 
     @property
     def raw_output(self):
+        """Return summary output as plain data without wrappers."""
         out = self.output
         if not out:
             return {}

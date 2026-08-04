@@ -238,51 +238,82 @@ class CephMonTestsBase(utils.BaseTestCase):
                      'osd.1': 501}}
 
 
-class TestCoreCephCluster(CephMonTestsBase):
-    """ Unit tests for ceph cluster code. """
+class TestCoreCephCluster(  # pylint: disable=too-many-public-methods
+        CephMonTestsBase):
+    """Unit tests for ceph cluster code."""
     def test_cluster_mons(self):
+        """Test that cluster mon objects have correct type."""
         cluster_mons = ceph.CephCluster().mons
         self.assertEqual([ceph.daemon.CephMon],
                          list(set(type(obj) for obj in cluster_mons)))
 
     def test_cluster_osds(self):
+        """Test that cluster osd objects have correct type."""
         cluster_osds = ceph.CephCluster().osds
         self.assertEqual([ceph.daemon.CephOSD],
                          list(set(type(obj) for obj in cluster_osds)))
 
     def test_health_status(self):
+        """Test cluster health status is parsed correctly."""
         health = ceph.CephCluster().health_status
         self.assertEqual(health, 'HEALTH_WARN')
 
     def test_osd_versions(self):
+        """Test OSD daemon versions are reported correctly."""
         versions = ceph.CephCluster().daemon_versions('osd')
         self.assertEqual(versions, {'15.2.14': 3})
 
     def test_mon_versions(self):
+        """Test mon daemon versions are reported correctly."""
         versions = ceph.CephCluster().daemon_versions('mon')
         self.assertEqual(versions, {'15.2.14': 3})
 
     def test_mds_versions(self):
+        """Test MDS daemon versions return empty."""
         versions = ceph.CephCluster().daemon_versions('mds')
         self.assertEqual(versions, {})
 
     def test_rgw_versions(self):
+        """Test RGW daemon versions return empty."""
         versions = ceph.CephCluster().daemon_versions('rgw')
         self.assertEqual(versions, {})
 
     def test_osd_release_name(self):
+        """Test OSD release names are reported correctly."""
         release_names = ceph.CephCluster().daemon_release_names('osd')
         self.assertEqual(release_names, {'octopus': 3})
 
     def test_mon_release_name(self):
+        """Test mon release names are reported correctly."""
         release_names = ceph.CephCluster().daemon_release_names('mon')
         self.assertEqual(release_names, {'octopus': 3})
 
     def test_cluster_osd_ids(self):
+        """Test cluster OSD IDs are listed correctly."""
         cluster = ceph.CephCluster()
         self.assertEqual([osd.id for osd in cluster.osds], [0, 1, 2])
 
+    def test_osd_pg_max_limit_default(self):
+        """When no OSD daemon config is available, use default threshold."""
+        cluster = ceph.CephCluster()
+        # Default: 250 * 3.0 * 2/3 = 500
+        self.assertEqual(cluster.osd_pg_max_limit, 500)
+
+    @utils.create_data_root(
+        {'sos_commands/ceph_osd/ceph_daemon_osd.0_config_show':
+         json.dumps({"mon_max_pg_per_osd": "500",
+                     "osd_max_pg_per_osd_hard_ratio": "3.000000"})},
+        copy_from_original=[
+            'sos_commands/ceph_mon/json_output/'
+            'ceph_osd_dump_--format_json-pretty'])
+    def test_osd_pg_max_limit_custom_config(self):
+        """When mon_max_pg_per_osd is configured higher, threshold adapts."""
+        cluster = ceph.CephCluster()
+        # Custom: 500 * 3.0 * 2/3 = 1000
+        self.assertEqual(cluster.osd_pg_max_limit, 1000)
+
     def test_crush_rules(self):
+        """Test CRUSH rules and pool assignments."""
         cluster = ceph.CephCluster()
         expected = {'replicated_rule': {'id': 0, 'type': 'replicated',
                     'pools': ['device_health_metrics (1)', 'glance (2)',
@@ -290,6 +321,7 @@ class TestCoreCephCluster(CephMonTestsBase):
         self.assertEqual(cluster.crush_map.rules, expected)
 
     def test_ceph_daemon_versions_unique(self):
+        """Test all daemon versions are aligned."""
         result = {'mgr': ['15.2.14'],
                   'mon': ['15.2.14'],
                   'osd': ['15.2.14']}
@@ -301,6 +333,7 @@ class TestCoreCephCluster(CephMonTestsBase):
     @utils.create_data_root({'sos_commands/ceph_mon/ceph_versions':
                              CEPH_VERSIONS_MISMATCHED_MINOR_MONS_UNALIGNED})
     def test_ceph_daemon_versions_unique_not(self):
+        """Test mismatched daemon versions are detected."""
         result = {'mgr': ['15.2.11'],
                   'mon': ['15.2.10',
                           '15.2.11'],
@@ -312,6 +345,7 @@ class TestCoreCephCluster(CephMonTestsBase):
         self.assertFalse(cluster.mon_versions_aligned_with_cluster)
 
     def test_crushmap_equal_buckets(self):
+        """Test no imbalance for equal CRUSH buckets."""
         cluster = ceph.CephCluster()
         buckets = cluster.crush_map.crushmap_equal_buckets
         self.assertEqual(buckets, [])
@@ -319,11 +353,13 @@ class TestCoreCephCluster(CephMonTestsBase):
     @utils.create_data_root({'sos_commands/ceph_mon/ceph_osd_crush_dump':
                              CEPH_OSD_CRUSH_DUMP})
     def test_crushmap_mixed_buckets(self):
+        """Test mixed CRUSH bucket types are detected."""
         cluster = ceph.CephCluster()
         buckets = cluster.crush_map.crushmap_mixed_buckets
         self.assertEqual(buckets, ['default'])
 
     def test_crushmap_no_mixed_buckets(self):
+        """Test no mixed buckets with uniform types."""
         cluster = ceph.CephCluster()
         buckets = cluster.crush_map.crushmap_mixed_buckets
         self.assertEqual(buckets, [])
@@ -338,7 +374,57 @@ class TestCoreCephCluster(CephMonTestsBase):
         # With a single OSD, there's nothing to compare, so no imbalance
         self.assertEqual(buckets, [])
 
+    def test_mixed_size_osd_same_size(self):
+        """Default data has all same-size OSDs - no mixed size warning."""
+        cluster = ceph.CephCluster()
+        self.assertEqual(cluster.mixed_size_osd_device_classes, [])
+
+    @mock.patch.object(ceph.cluster, 'CLIHelper')
+    def test_mixed_size_osd_different_sizes(self, mock_cli_helper):
+        """Mixed OSD sizes within same device class should be detected."""
+        inst = mock.MagicMock()
+        mock_cli_helper.return_value = inst
+        inst.ceph_osd_df_tree_json_decoded.return_value = {
+            'nodes': [
+                {'id': 0, 'device_class': 'hdd', 'name': 'osd.0',
+                 'type': 'osd', 'kb': 4000000000},
+                {'id': 1, 'device_class': 'hdd', 'name': 'osd.1',
+                 'type': 'osd', 'kb': 8000000000},
+                {'id': 2, 'device_class': 'ssd', 'name': 'osd.2',
+                 'type': 'osd', 'kb': 1000000000},
+                {'id': 3, 'device_class': 'ssd', 'name': 'osd.3',
+                 'type': 'osd', 'kb': 1000000000},
+                {'id': -1, 'name': 'default', 'type': 'root'}
+            ],
+            'summary': {'average_utilization': 10.0}}
+        cluster = ceph.CephCluster()
+        result = cluster.mixed_size_osd_device_classes
+        self.assertEqual(len(result), 1)
+        self.assertIn("'hdd'", result[0])
+
+    @mock.patch.object(ceph.cluster, 'CLIHelper')
+    def test_mixed_size_osd_different_classes_ok(self, mock_cli_helper):
+        """Different sizes across different device classes is fine."""
+        inst = mock.MagicMock()
+        mock_cli_helper.return_value = inst
+        inst.ceph_osd_df_tree_json_decoded.return_value = {
+            'nodes': [
+                {'id': 0, 'device_class': 'hdd', 'name': 'osd.0',
+                 'type': 'osd', 'kb': 8000000000},
+                {'id': 1, 'device_class': 'hdd', 'name': 'osd.1',
+                 'type': 'osd', 'kb': 8000000000},
+                {'id': 2, 'device_class': 'ssd', 'name': 'osd.2',
+                 'type': 'osd', 'kb': 1000000000},
+                {'id': 3, 'device_class': 'ssd', 'name': 'osd.3',
+                 'type': 'osd', 'kb': 1000000000},
+                {'id': -1, 'name': 'default', 'type': 'root'}
+            ],
+            'summary': {'average_utilization': 10.0}}
+        cluster = ceph.CephCluster()
+        self.assertEqual(cluster.mixed_size_osd_device_classes, [])
+
     def test_mgr_modules(self):
+        """Test manager modules are listed correctly."""
         cluster = ceph.CephCluster()
         expected = ['balancer',
                     'crash',
@@ -371,6 +457,7 @@ class TestCoreCephCluster(CephMonTestsBase):
 class TestCephMonSummary(CephMonTestsBase):
     """ Unit tests for ceph mon summary. """
     def test_services(self):
+        """Test service info and release details."""
         svc_info = {'systemd': {'enabled': [
                                     'ceph-crash',
                                     'ceph-mgr',
@@ -392,6 +479,7 @@ class TestCephMonSummary(CephMonTestsBase):
         self.assertEqual(actual['status'], 'HEALTH_WARN')
 
     def test_network_info(self):
+        """Test cluster and public network info."""
         expected = {'cluster': {
                         'eth0@if17': {
                             'addresses': ['10.0.0.123'],
@@ -412,6 +500,7 @@ class TestCephMonSummary(CephMonTestsBase):
         self.assertEqual(actual['network'], expected)
 
     def test_cluster_info(self):
+        """Test CRUSH rules and versions in summary."""
         expected = {'crush-rules': {
                         'replicated_rule': {
                             'id': 0,
@@ -436,6 +525,7 @@ class TestCephMonSummary(CephMonTestsBase):
                              'ceph_pg_dump_--format_json-pretty':
                              json.dumps(PG_DUMP_JSON_DECODED)})
     def test_cluster_info_large_omap_pgs(self):
+        """Test large OMAP PGs are reported in summary."""
         expected = {'2.f': {
                         'pool': 'foo',
                         'last_scrub_stamp': '2021-09-16T21:26:00.00',
@@ -446,6 +536,7 @@ class TestCephMonSummary(CephMonTestsBase):
 
     @mock.patch.object(ceph.cluster, 'CLIHelper')
     def test_ceph_pg_imbalance(self, mock_helper):
+        """Test PG imbalance detection across OSDs."""
         result = self.setup_fake_cli_osds_imbalanced_pgs(mock_helper)
         inst = ceph_summary.CephSummary()
         actual = self.part_output_to_actual(inst.output)
@@ -458,12 +549,14 @@ class TestCephMonSummary(CephMonTestsBase):
                              'ceph_osd_df_tree_--format_json-pretty':
                              json.dumps([])})
     def test_ceph_pg_imbalance_unavailable(self):
+        """Test summary omits PG info when unavailable."""
         inst = ceph_summary.CephSummary()
         actual = self.part_output_to_actual(inst.output)
         self.assertNotIn('osd-pgs-suboptimal', actual)
         self.assertNotIn('osd-pgs-near-limit', actual)
 
     def test_ceph_versions(self):
+        """Test daemon versions appear in summary."""
         result = {'mgr': ['15.2.14'],
                   'mon': ['15.2.14'],
                   'osd': ['15.2.14']}
@@ -474,6 +567,7 @@ class TestCephMonSummary(CephMonTestsBase):
     @utils.create_data_root({'sos_commands/ceph_mon/ceph_versions':
                              json.dumps([])})
     def test_ceph_versions_unavailable(self):
+        """Test versions key absent when data unavailable."""
         inst = ceph_summary.CephSummary()
         actual = self.part_output_to_actual(inst.output)
         self.assertIsNone(actual.get('versions'))
@@ -486,6 +580,7 @@ class TestCephMonEvents(CephMonTestsBase):
                                         'events/storage/ceph'))
     @mock.patch('hotsos.core.search.CLIHelper')
     def test_ceph_daemon_log_checker(self, mock_cli):
+        """Test mon log event patterns are detected."""
         mock_cli.return_value = mock.MagicMock()
         # ensure log file contents are within allowed timeframe ("since")
         mock_cli.return_value.date.return_value = "2022-02-10 00:00:00"

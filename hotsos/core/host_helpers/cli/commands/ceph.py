@@ -49,6 +49,7 @@ class CephJSONFileCmd(FileCmd):
             self.last_line_filter = last_line_filter
 
     def format_json_contents(self, *_args, **_kwargs):
+        """ Strip trailing non-JSON line and redirect to tmpfile. """
         if not os.path.exists(self.path):
             raise SourceNotFound(self.path)
 
@@ -196,6 +197,29 @@ class CephOSDCrushDumpCommands(UserList):
         super().__init__(cmds)
 
 
+class CephOSDCrushTreeCommands(UserList):
+    """ Generate ceph osd crush tree --show-shadow command variants. """
+
+    def __init__(self):
+        prefixes = [""] + CEPH_ALIASES
+        # binary
+        cmds = [CephJSONBinCmd(f'{prefix}ceph osd crush tree --show-shadow '
+                               '--format json-pretty')
+                for prefix in prefixes]
+        # file-based
+        # sosreport < 4.2
+        cmds.append(CephJSONFileCmd(
+            'sos_commands/ceph/json_output/'
+            'ceph_osd_crush_tree_--show-shadow_--format_json-pretty'))
+        # sosreport >= 4.2
+        cmds.extend([CephJSONFileCmd(
+            'sos_commands/ceph_mon/json_output/'
+            f'{prefix}ceph_osd_crush_tree_--show-shadow_'
+            '--format_json-pretty')
+            for prefix in prefixes])
+        super().__init__(cmds)
+
+
 class CephPGDumpCommands(UserList):
     """ Generate ceph pg dump command variants. """
 
@@ -290,6 +314,22 @@ class CephReportCommands(UserList):
         # sosreport >= 4.2
         cmds.extend([CephJSONFileCmd('sos_commands/ceph_mon/'
                                      f'{prefix}ceph_report', **json_kwargs)
+                     for prefix in prefixes])
+        super().__init__(cmds)
+
+
+class CephConfigDumpCommands(UserList):
+    """ Generate ceph config dump command variants. """
+
+    def __init__(self):
+        prefixes = [""] + CEPH_ALIASES
+        # binary
+        cmds = [CephJSONBinCmd(f'{prefix}ceph config dump --format '
+                               'json-pretty') for prefix in prefixes]
+        # file-based
+        cmds.extend([CephJSONFileCmd('sos_commands/ceph_mon/json_output/'
+                                     f'{prefix}ceph_config_dump_'
+                                     '--format_json-pretty')
                      for prefix in prefixes])
         super().__init__(cmds)
 

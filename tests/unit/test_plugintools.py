@@ -7,145 +7,11 @@ from unittest import mock
 from hotsos.client import OutputManager, OutputBuilder
 from hotsos.core.host_helpers.cli import CLIHelper
 from hotsos.core.issues import IssuesManager
-from hotsos.core import plugintools
 
 from . import utils
 
 # It is fine for a test to access a protected member so allow it for all tests
 # pylint: disable=protected-access
-
-HTML1 = """<ul class="tree">
-<li>
-<details>
-<summary>item-1</summary>
-<ul >
-<li>
-<b>level-2</b>
-
-<ul>
-<li>
-value-1
-</li><li>
-value-2
-</li><li>
-value-3
-</li><li>
-value-4
-</li>
-</ul>
-</li>
-<li>
-<b>level-3</b>
-plain value
-</li>
-</ul>
-</details>
-</li>
-<li>
-<details>
-<summary>item-2</summary>
-
-<ul>
-<li>
-a
-</li><li>
-b
-</li><li>
-c
-</li>
-</ul>
-</details>
-</li>
-</ul>"""
-
-HTML2 = """<ul class="tree">
-<li>
-<details>
-<summary>item-1</summary>
-<ul >
-<li>
-<b>level-2</b>
-
-<ul>
-<li>
-value-1
-</li><li>
-value-2
-</li><li>
-value-3
-</li><li>
-value-4
-</li>
-</ul>
-</li>
-<li>
-<b>level-3</b>
-plain value
-</li>
-</ul>
-</details>
-</li>
-<li>
-<details>
-<summary>item-2</summary>
-
-<ul>
-<li>
-a
-</li><li>
-b
-</li><li>
-c
-</li>
-</ul>
-</details>
-</li>
-</ul>"""
-
-HTML3 = """<ul class="tree">
-<li>
-<details>
-<summary>item-1</summary>
-<ul >
-<li>
-<b>level-2</b>
-
-<ul>
-<li>
-value-1
-</li><li>
-value-2
-</li><li>
-value-3
-</li><li>
-value-4
-</li>
-</ul>
-</li>
-<li>
-<b>level-3</b>
-plain value
-</li>
-</ul>
-</details>
-</li>
-<li>
-<details>
-<summary>item-2</summary>
-
-<ul>
-<li>
-a
-</li><li>
-b
-</li><li>
-c
-</li>
-</ul>
-</details>
-</li>
-</ul>"""
-
 
 ISSUES_LEGACY_FORMAT = {
     'testplugin': {
@@ -168,10 +34,12 @@ ISSUES_NEW_FORMAT = {
 class TestPluginTools(utils.BaseTestCase):
     """ Unit tests for plugintools code. """
     def test_summary_empty(self):
+        """Test empty summary produces empty JSON."""
         filtered = OutputManager().get_builder().to(fmt="json")
         self.assertEqual(filtered, '{}')
 
     def test_summary_mode_short_legacy(self):
+        """Test short mode minimisation of legacy format."""
         expected = {IssuesManager.SUMMARY_OUT_ISSUES_ROOT: {
                         'testplugin': [{
                             'type': 'MemoryWarning',
@@ -185,6 +53,7 @@ class TestPluginTools(utils.BaseTestCase):
         self.assertEqual(filtered, expected)
 
     def test_summary_mode_short(self):
+        """Test short mode minimisation of new format."""
         expected = {IssuesManager.SUMMARY_OUT_ISSUES_ROOT: {
                         'testplugin': {
                             'MemoryWarnings': ['a msg']}},
@@ -196,6 +65,7 @@ class TestPluginTools(utils.BaseTestCase):
         self.assertEqual(filtered, expected)
 
     def test_summary_mode_very_short_legacy(self):
+        """Test very-short mode minimisation of legacy format."""
         expected = {IssuesManager.SUMMARY_OUT_ISSUES_ROOT: {
                         'testplugin': {
                             'MemoryWarning': 1}},
@@ -206,6 +76,7 @@ class TestPluginTools(utils.BaseTestCase):
         self.assertEqual(filtered, expected)
 
     def test_summary_mode_very_short(self):
+        """Test very-short mode minimisation of new format."""
         expected = {IssuesManager.SUMMARY_OUT_ISSUES_ROOT: {
                         'testplugin': {
                             'MemoryWarnings': 1}},
@@ -217,12 +88,14 @@ class TestPluginTools(utils.BaseTestCase):
         self.assertEqual(filtered, expected)
 
     def test_apply_output_formatting_json(self):
+        """Test JSON output formatting."""
         summary = {'opt': 'value'}
         filtered = OutputManager(summary).get_builder().to("json")
         self.assertEqual(filtered, json.dumps(summary, indent=2,
                                               sort_keys=True))
 
     def test_apply_output_formatting_markdown(self):
+        """Test markdown output formatting."""
         summary = {
             'item-1':
                 {
@@ -261,7 +134,7 @@ plain value
         self.assertEqual(filtered, expected)
 
     def test_apply_output_formatting_html_1(self):
-        htmlout = plugintools.HTMLFormatter(CLIHelper().hostname())
+        """Test HTML output formatting variant 1."""
         summary = {
             'item-1':
                 {
@@ -276,12 +149,15 @@ plain value
             'item-2':
                 ['a', 'b', 'c'],
         }
-        expected = htmlout.header + HTML1 + htmlout.footer
         filtered = OutputManager(summary).get_builder().to(fmt="html")
-        self.assertEqual(filtered, expected)
+        self.assertIn('vanilla-framework-version-', filtered)
+        self.assertIn('p-side-navigation', filtered)
+        self.assertIn('id="item-1"', filtered)
+        self.assertIn('id="item-2"', filtered)
+        self.assertIn('value-4', filtered)
 
     def test_apply_output_formatting_html_2(self):
-        htmlout = plugintools.HTMLFormatter(CLIHelper().hostname())
+        """Test HTML output formatting variant 2."""
         summary = {
             'item-1':
                 {
@@ -296,15 +172,15 @@ plain value
             'item-2':
                 ['a', 'b', 'c'],
         }
-        expected = htmlout.header + HTML2 + htmlout.footer
         filtered = OutputManager(summary).get_builder().to(fmt="html")
-        self.assertEqual(filtered, expected)
+        self.assertIn('Known issues/bugs', filtered)
 
     def test_apply_output_formatting_html_3(self):
-        htmlout = plugintools.HTMLFormatter(CLIHelper().hostname())
+        """Test HTML output formatting variant 3."""
         summary = {
-            'item-1':
+            'system':
                 {
+                    'hostname': 'compute4',
                     'level-2': [
                         'value-1',
                         'value-2',
@@ -316,9 +192,10 @@ plain value
             'item-2':
                 ['a', 'b', 'c'],
         }
-        expected = htmlout.header + HTML3 + htmlout.footer
         filtered = OutputManager(summary).get_builder().to(fmt="html")
-        self.assertEqual(filtered, expected)
+        self.assertIn(f'Host: <strong>{CLIHelper().hostname()}</strong>',
+                      filtered)
+        self.assertIn('Generated ', filtered)
 
 
 class TestOutputManagerLogile(utils.BaseTestCase):
@@ -327,6 +204,7 @@ class TestOutputManagerLogile(utils.BaseTestCase):
     """
 
     def test_compressed_logfile(self):
+        """Test log file compression in output directory."""
         with tempfile.NamedTemporaryFile(delete=False) as ftmp:
             with mock.patch('hotsos.client.log.handlers',
                             [logging.FileHandler(ftmp.name)]):

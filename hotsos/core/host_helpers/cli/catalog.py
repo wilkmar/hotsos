@@ -60,6 +60,13 @@ class CommandCatalog(UserDict):
                  FileCmd('sos_commands/ceph_osd/'
                          'ceph_daemon_osd.{osd_id}_dump_mempools',
                          json_decode=True)],
+            'ceph_daemon_osd_perf_dump':
+                [BinCmd('ceph daemon osd.{osd_id} perf dump',
+                        json_decode=True),
+                 # requires sosreport 4.3 or above
+                 FileCmd('sos_commands/ceph_osd/'
+                         'ceph_daemon_osd.{osd_id}_perf_dump',
+                         json_decode=True)],
             'ceph_health_detail_json_decoded': ceph.CephHealthDetailCommands(),
             'ceph_mon_dump_json_decoded': ceph.CephMonDumpCommands(),
             'ceph_osd_dump_json_decoded': ceph.CephOSDDumpCommands(),
@@ -67,11 +74,14 @@ class CommandCatalog(UserDict):
             'ceph_osd_df_tree_json_decoded': ceph.CepOSDDFTreeCommands(),
             'ceph_osd_crush_dump_json_decoded':
                 ceph.CephOSDCrushDumpCommands(),
+            'ceph_osd_crush_tree_json_decoded':
+                ceph.CephOSDCrushTreeCommands(),
             'ceph_pg_dump_json_decoded': ceph.CephPGDumpCommands(),
             'ceph_status_json_decoded': ceph.CephStatusCommands(),
             'ceph_versions': ceph.CephVersionsCommands(),
             'ceph_volume_lvm_list': ceph.CephVolumeLVMListCommands(),
             'ceph_report_json_decoded': ceph.CephReportCommands(),
+            'ceph_config_dump_json_decoded': ceph.CephConfigDumpCommands(),
             'ceph_mgr_module_ls': ceph.CephMgrModuleLsCommands(),
             'date':
                 [DateBinCmd('date', singleline=True),

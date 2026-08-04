@@ -1,0 +1,17 @@
+target-name: lp1934937.yaml
+data-root:
+  files:
+    var/log/syslog: |
+      Mar 24 08:00:27 testnode02 nova-compute[3334105]: Traceback (most recent call last):
+      Mar 24 08:00:27 testnode02 nova-compute[3334105]:   File "/usr/lib/python3/dist-packages/eventlet/hubs/hub.py", line 476, in fire_timers
+      Mar 24 08:00:27 testnode02 nova-compute[3334105]:     timer()
+      Mar 24 08:00:27 testnode02 nova-compute[3334105]:   File "/usr/lib/python3/dist-packages/eventlet/hubs/timer.py", line 59, in __call__
+      Mar 24 08:00:27 testnode02 nova-compute[3334105]:     cb(*args, **kw)
+      Mar 24 08:00:27 testnode02 nova-compute[3334105]:   File "/usr/lib/python3/dist-packages/eventlet/semaphore.py", line 152, in _do_acquire
+      Mar 24 08:00:27 testnode02 nova-compute[3334105]:     waiter.switch()
+      Mar 24 08:00:27 testnode02 nova-compute[3334105]: greenlet.error: cannot switch to a different thread
+    sos_commands/dpkg/dpkg_-l: |
+      ii  python3-oslo.messaging               12.13.0-0ubuntu1.2                                      all          oslo messaging library - Python 3.x
+  copy-from-original:
+    - sos_commands/date/date
+raised-bugs:

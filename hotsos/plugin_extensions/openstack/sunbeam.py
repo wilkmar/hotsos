@@ -1,3 +1,4 @@
+from hotsos.core.issues import IssuesManager, OpenstackWarning
 from hotsos.core.plugins.openstack.common import (
     OpenstackBase,
     OpenStackChecks,
@@ -16,9 +17,16 @@ class SunbeamStatus(OpenstackBase, OpenStackChecks):
     @staticmethod
     @summary_entry('sunbeam', get_min_available_entry_index() + 10)
     def summary_sunbeam():
+        """Return Sunbeam pod and statefulset info."""
         sunbeam = SunbeamInfo()
         if sunbeam.pods:
             return {'pods': sunbeam.pods,
                     'statefulsets': sunbeam.statefulsets}
+
+        if sunbeam.is_controller:
+            IssuesManager().add(OpenstackWarning(
+                "this host is a sunbeam controller but no kubernetes data "
+                "was found - kubectl may have failed (does ~/.kube/config "
+                "exist?)"))
 
         return None

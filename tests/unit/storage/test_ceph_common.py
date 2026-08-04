@@ -45,6 +45,7 @@ class TestCephConfig(CephCommonTestsBase):
     """ Test for ceph config class """
 
     def test_config(self):
+        """Test ceph config keys are parsed correctly."""
         conf = ceph.common.CephConfig()
         expected = ['auth cluster required',
                     'auth service required',
@@ -72,6 +73,7 @@ class TestCephConfig(CephCommonTestsBase):
     @utils.create_data_root(files_to_create={
         'var/snap/microceph/current/conf/ceph.conf': CEPH_CONF})
     def test_microceph_config(self):
+        """Test microceph snap config keys are parsed."""
         conf = ceph.common.CephConfig()
         expected = ['run dir',
                     'fsid',
@@ -88,13 +90,66 @@ class TestCephConfig(CephCommonTestsBase):
 class TestCephPluginDeps(CephCommonTestsBase):
     """ Unit tests for ceph plugin deps. """
     def test_ceph_dep_dpkg(self):
+        """Test ceph is runnable via dpkg packages."""
         self.assertTrue(ceph.common.CephChecks().is_runnable())
 
     @utils.create_data_root({'sos_commands/snap/snap_list_--all':
                              SNAP_LIST_MICROCEPH})
     def test_ceph_dep_snap(self):
+        """Test ceph is runnable via microceph snap."""
         self.assertTrue(ceph.common.CephChecks().is_runnable())
         self.assertEqual(ceph.common.CephChecks().release_name, 'reef')
+
+
+class TestCephChecks(CephCommonTestsBase):
+    """ Unit tests for ceph checks. """
+    def test_mds_balancer_disabled_by_interval(self):
+        cases = [
+            ('mds config dump',
+             [{'name': 'mds_bal_interval',
+               'section': 'mds',
+               'value': '0'}], {}, True),
+            ('global config dump',
+             [{'name': 'mds_bal_interval',
+               'section': 'global',
+               'value': '0'}], {}, True),
+            ('mds overrides global',
+             [{'name': 'mds_bal_interval',
+               'section': 'global',
+               'value': '0'},
+              {'name': 'mds_bal_interval',
+               'section': 'mds',
+               'value': '10'}], {}, False),
+            ('ceph config fallback', [], {'mds_bal_interval': '0'}, True),
+        ]
+        for name, config_dump, ceph_config, expected in cases:
+            with self.subTest(name=name):
+                checks = ceph.common.CephChecks()
+                checks.cluster.ceph_config_dump = config_dump
+                checks.cluster.crush_map.ceph_report = {}
+                checks.ceph_config = ceph_config
+                self.assertEqual(checks.mds_balancer_disabled, expected)
+
+    def test_mds_balancer_disabled_by_balance_automate(self):
+        cases = [
+            ('disabled for all filesystems',
+             [{'mdsmap': {'flags_state': {'balance_automate': False}}},
+              {'mdsmap': {'flags_state': {'balance_automate': False}}}],
+             True),
+            ('enabled for one filesystem',
+             [{'mdsmap': {'flags_state': {'balance_automate': False}}},
+              {'mdsmap': {'flags_state': {'balance_automate': True}}}],
+             False),
+            ('flag unavailable', [{'mdsmap': {}}], False),
+        ]
+        for name, filesystems, expected in cases:
+            with self.subTest(name=name):
+                checks = ceph.common.CephChecks()
+                checks.cluster.ceph_config_dump = []
+                checks.cluster.crush_map.ceph_report = {
+                    'fsmap': {'filesystems': filesystems}}
+                checks.ceph_config = {}
+                self.assertEqual(checks.mds_balancer_disabled, expected)
 
 
 @utils.load_templated_tests('scenarios/storage/ceph/common')

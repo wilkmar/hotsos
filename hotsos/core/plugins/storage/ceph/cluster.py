@@ -1,3 +1,4 @@
+import logging
 import re
 from functools import cached_property
 
@@ -10,222 +11,18 @@ from hotsos.core.search import (
     SequenceSearchDef,
     SearchDef
 )
+from hotsos.core.plugins.storage.ceph.crushmap import CephCrushMap
 from hotsos.core.plugins.storage.ceph.daemon import (
     CephMon,
     CephOSD,
 )
 from hotsos.core.utils import sorted_dict
 
-CEPH_POOL_TYPE = {1: 'replicated', 3: 'erasure-coded'}
+log = logging.getLogger()
 
-
-class CephCrushMap():
-    """
-    Representation of a Ceph cluster CRUSH map.
-    """
-    @staticmethod
-    def _filter_pools_by_rule(pools, crush_rule):
-        res_pool = []
-        for pool in pools:
-            if pool['crush_rule'] == crush_rule:
-                pool_str = pool['pool_name'] + ' (' + str(pool['pool']) + ')'
-                res_pool.append(pool_str)
-
-        return res_pool
-
-    @cached_property
-    def osd_crush_dump(self):
-        return CLIHelper().ceph_osd_crush_dump_json_decoded() or {}
-
-    @cached_property
-    def ceph_report(self):
-        return CLIHelper().ceph_report_json_decoded() or {}
-
-    @cached_property
-    def rules(self):
-        """
-        Returns a list of crush rules, mapped to the respective pools.
-        """
-        if not self.ceph_report:
-            return {}
-
-        rule_to_pool = {}
-        for rule in self.ceph_report['crushmap']['rules']:
-            rule_id = rule['rule_id']
-            rtype = rule['type']
-            pools = self.ceph_report['osdmap']['pools']
-            pools = self._filter_pools_by_rule(pools, rule_id)
-            rule_to_pool[rule['rule_name']] = {'id': rule_id,
-                                               'type': CEPH_POOL_TYPE[rtype],
-                                               'pools': pools}
-
-        return rule_to_pool
-
-    @staticmethod
-    def _build_buckets_from_crushdump(crushdump):
-        buckets = {}
-        # iterate jp for each bucket
-        for bucket in crushdump["buckets"]:
-            bid = bucket["id"]
-            items = []
-            for item in bucket["items"]:
-                items.append(item["id"])
-
-            buckets[bid] = {"name": bucket["name"],
-                            "type_id": bucket["type_id"],
-                            "type_name": bucket["type_name"],
-                            "items": items}
-
-        return buckets
-
-    def _rule_used_by_any_pool(self, rule_id):
-        for pool_dict in self.rules.values():
-            if (pool_dict['id'] == rule_id) and pool_dict['pools']:
-                return True
-        return False
-
-    @cached_property
-    def crushmap_mixed_buckets(self):
-        """
-        Report buckets that have mixed type of items,
-        as they will cause crush map unable to compute
-        the expected up set
-        """
-        if not self.osd_crush_dump:
-            return []
-
-        bad_buckets = []
-        buckets = self._build_buckets_from_crushdump(self.osd_crush_dump)
-        # check all buckets
-        for bdict in buckets.values():
-            items = bdict["items"]
-            type_ids = []
-            for item in items:
-                if item >= 0:
-                    type_ids.append(0)
-                else:
-                    type_ids.append(buckets[item]["type_id"])
-
-            if not type_ids:
-                continue
-
-            # verify if the type_id list contain mixed type id
-            if type_ids.count(type_ids[0]) != len(type_ids):
-                bad_buckets.append(bdict["name"])
-
-        return bad_buckets
-
-    @cached_property
-    def crushmap_mixed_buckets_str(self):
-        return ','.join(self.crushmap_mixed_buckets)
-
-    def _is_bucket_imbalanced(self, buckets, start_bucket_id, failure_domain,
-                              weight=-1):
-        """Return whether a tree is unbalanced
-
-        Recursively determine if a given tree (start_bucket_id) is
-        balanced at the given failure domain (failure_domain) in the
-        CRUSH tree(s) provided by the buckets parameter.
-        """
-
-        for item in buckets[start_bucket_id]["items"]:
-            # Skip items that are not buckets (e.g., OSDs with positive IDs)
-            # since they are leaf nodes and don't exist in buckets.
-            if item["id"] not in buckets:
-                continue
-            if buckets[item["id"]]["type_name"] != failure_domain:
-                if self._is_bucket_imbalanced(buckets, item["id"],
-                                              failure_domain, weight):
-                    return True
-            # Handle items/buckets with 0 weight correctly, by
-            # ignoring them.
-            # These are excluded from placement consideration,
-            # and therefore do not unbalance a tree.
-            elif item["weight"] > 0:
-                if weight == -1:
-                    weight = item["weight"]
-                else:
-                    if weight != item["weight"]:
-                        return True
-
-        return False
-
-    @cached_property
-    def crushmap_equal_buckets(self):
-        """
-        Report when in-use failure domain buckets are unbalanced.
-
-        Uses the trees and failure domains referenced in the
-        CRUSH rules, and checks that all buckets of the failure
-        domain type in the referenced tree are equal or of zero size.
-        """
-        if not self.osd_crush_dump:
-            return []
-
-        buckets = {b['id']: b for b in self.osd_crush_dump["buckets"]}
-
-        to_check = []
-        for rule in self.osd_crush_dump.get('rules', []):
-            taken = 0
-            fdomain = 0
-            rid = rule["rule_id"]
-            for i in rule['steps']:
-                if i["op"] == "take":
-                    taken = i["item"]
-                if "type" in i and taken != 0:
-                    fdomain = i["type"]
-                if taken != 0 and fdomain != 0 and \
-                        self._rule_used_by_any_pool(rid):
-                    to_check.append((rid, taken, fdomain))
-                    taken = fdomain = 0
-
-        unequal_buckets = []
-        for _, tree, failure_domain in to_check:
-            if self._is_bucket_imbalanced(buckets, tree, failure_domain):
-                unequal_buckets.append(f"tree '{buckets[tree]['name']}' at "
-                                       f"the '{failure_domain}' level")
-
-        return unequal_buckets
-
-    @cached_property
-    def crushmap_equal_buckets_pretty(self):
-        unequal = self.crushmap_equal_buckets
-        if unequal:
-            return ", ".join(unequal)
-
-        return None
-
-    @cached_property
-    def autoscaler_enabled_pools(self):
-        if not self.ceph_report:
-            return []
-
-        pools = self.ceph_report['osdmap']['pools']
-        return [p for p in pools if p.get('pg_autoscale_mode') == 'on']
-
-    @cached_property
-    def autoscaler_disabled_pools(self):
-        if not self.ceph_report:
-            return []
-
-        pools = self.ceph_report['osdmap']['pools']
-        return [p for p in pools if p.get('pg_autoscale_mode') != 'on']
-
-    @cached_property
-    def is_rgw_using_civetweb(self):
-        if not self.ceph_report:
-            return []
-
-        try:
-            rgws = self.ceph_report['servicemap']['services']['rgw']['daemons']
-            for _, outer_d in rgws.items():
-                if isinstance(outer_d, dict):
-                    if outer_d['metadata']['frontend_type#0'] == 'civetweb':
-                        return True
-        except (ValueError, KeyError):
-            pass
-
-        return False
+# Percentage by which OSD sizes within a device class may differ
+# before we consider them "mixed".
+OSD_MIXED_SIZE_THRESHOLD_PERCENT = 10
 
 
 class CephCluster():  # pylint: disable=too-many-public-methods
@@ -236,7 +33,11 @@ class CephCluster():  # pylint: disable=too-many-public-methods
           nature this is going to have a large number of public methods.
     """
     OSD_META_LIMIT_PERCENT = 5
-    OSD_PG_MAX_LIMIT = 500
+    # Ceph defaults for PG overdose protection
+    MON_MAX_PG_PER_OSD_DEFAULT = 250
+    OSD_MAX_PG_PER_OSD_HARD_RATIO_DEFAULT = 3.0
+    # Fraction of the hard limit at which we warn
+    OSD_PG_MAX_LIMIT_FRACTION = 2.0 / 3.0
     # min cluster utilisation required to trigger this warning
     OSD_PG_OPTIMAL_MIN_UTIL = 10
     OSD_PG_OPTIMAL_NUM_MAX = 200
@@ -249,7 +50,58 @@ class CephCluster():  # pylint: disable=too-many-public-methods
         self.crush_map = CephCrushMap()
 
     @cached_property
+    def ceph_config_dump(self):
+        return CLIHelper().ceph_config_dump_json_decoded() or []
+
+    @cached_property
+    def _osd_daemon_config(self):
+        """
+        Try to get daemon config from any local OSD. Returns a dict of config
+        values or empty dict if unavailable.
+        """
+        cli = CLIHelper()
+        for osd in self.osds:
+            config = cli.ceph_daemon_osd_config_show(osd_id=osd.id)
+            if config:
+                return config
+
+        return {}
+
+    @cached_property
+    def osd_pg_max_limit(self):
+        """
+        Compute the PG-per-OSD warning threshold dynamically based on the
+        configured mon_max_pg_per_osd and osd_max_pg_per_osd_hard_ratio.
+
+        The hard limit (at which Ceph refuses to create PGs) is:
+            mon_max_pg_per_osd * osd_max_pg_per_osd_hard_ratio
+
+        We warn at 2/3 of the hard limit to give operators time to act.
+        """
+        config = self._osd_daemon_config
+        try:
+            mon_max = int(config.get('mon_max_pg_per_osd',
+                                     self.MON_MAX_PG_PER_OSD_DEFAULT))
+        except (TypeError, ValueError):
+            mon_max = self.MON_MAX_PG_PER_OSD_DEFAULT
+
+        try:
+            hard_ratio = float(config.get(
+                'osd_max_pg_per_osd_hard_ratio',
+                self.OSD_MAX_PG_PER_OSD_HARD_RATIO_DEFAULT))
+        except (TypeError, ValueError):
+            hard_ratio = self.OSD_MAX_PG_PER_OSD_HARD_RATIO_DEFAULT
+
+        hard_limit = mon_max * hard_ratio
+        limit = int(hard_limit * self.OSD_PG_MAX_LIMIT_FRACTION)
+        log.debug("OSD PG max limit computed as %d (mon_max_pg_per_osd=%d, "
+                  "osd_max_pg_per_osd_hard_ratio=%.2f, hard_limit=%d)",
+                  limit, mon_max, hard_ratio, int(hard_limit))
+        return limit
+
+    @cached_property
     def health_status(self):
+        """ Return the cluster health status string. """
         status = CLIHelper().ceph_status_json_decoded()
         if status:
             return status['health']['status']
@@ -266,6 +118,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def pg_dump(self):
+        """ Return decoded JSON from ceph pg dump. """
         return CLIHelper().ceph_pg_dump_json_decoded() or {}
 
     @cached_property
@@ -274,6 +127,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def mons(self):
+        """ Return a list of CephMon objects for the cluster. """
         _mons = []
         for mon in self._mon_dump.get('mons', {}):
             _mons.append(CephMon(mon['name']))
@@ -298,10 +152,12 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def osd_df_tree(self):
+        """ Return decoded JSON from ceph osd df tree. """
         return CLIHelper().ceph_osd_df_tree_json_decoded() or {}
 
     @cached_property
     def ceph_df(self):
+        """ Return decoded JSON from ceph df. """
         return CLIHelper().ceph_df_json_decoded() or {}
 
     @cached_property
@@ -378,6 +234,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def cluster_osds_without_v2_messenger_protocol(self):
+        """ Return list of OSD ids still using v1 messenger. """
         v1_osds = []
         for osd in self.osds:
             for key, val in osd.dump.items():
@@ -492,6 +349,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def require_osd_release(self):
+        """ Return the require_osd_release value from osd dump. """
         return self._osd_dump.get('require_osd_release')
 
     @cached_property
@@ -509,6 +367,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def laggy_pgs(self):
+        """ Return PGs in laggy or wait states. """
         if not self.pg_dump:
             return []
 
@@ -522,6 +381,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
         return laggy_pgs
 
     def pool_id_to_name(self, pool_id):
+        """ Translate a numeric pool id to its pool name. """
         if not self._osd_dump:
             return None
 
@@ -534,6 +394,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def large_omap_pgs(self):
+        """ Return dict of PGs flagged with large omap objects. """
         _large_omap_pgs = {}
         if not self.pg_dump:
             return _large_omap_pgs
@@ -552,6 +413,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def large_omap_pgs_str(self):
+        """ Return comma-separated PG ids with large omap. """
         if not self.large_omap_pgs:
             return None
 
@@ -559,6 +421,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def bluefs_oversized_metadata_osds(self):
+        """ Return OSDs where BlueFS metadata exceeds threshold. """
         _bad_meta_osds = []
         if not self.osd_df_tree:
             return _bad_meta_osds
@@ -593,6 +456,27 @@ class CephCluster():  # pylint: disable=too-many-public-methods
                     self.POOL_EMPTY_THRESHOLD / 100.0:
                 return True
         return False
+
+    @cached_property
+    def pools_with_size_equal_min_size(self):
+        """
+        Returns a list of pool names where size == min_size. This is a risky
+        configuration because it means the pool cannot tolerate any OSD
+        failures without becoming unavailable.
+        """
+        bad_pools = []
+        ceph_report = self.crush_map.ceph_report
+        if not ceph_report:
+            return bad_pools
+
+        pools = ceph_report.get('osdmap', {}).get('pools', [])
+        for pool in pools:
+            size = pool.get('size', 0)
+            min_size = pool.get('min_size', 0)
+            if 0 < size <= min_size:
+                bad_pools.append(pool['pool_name'])
+
+        return bad_pools
 
     @staticmethod
     def version_as_a_tuple(ver):
@@ -631,6 +515,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def ceph_versions_aligned(self):
+        """ Return True if all daemon types run the same version. """
         versions = self.ceph_daemon_versions_unique()
         if not versions:
             return True
@@ -668,6 +553,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def osdmaps_count(self):
+        """ Return the number of pinned OSD maps in the cluster. """
         report = CLIHelper().ceph_report_json_decoded()
         if not report:
             return 0
@@ -679,6 +565,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def osds_pgs(self):
+        """ Return dict mapping each OSD name to its PG count. """
         _osds_pgs = {}
         if not self.osd_df_tree:
             return _osds_pgs
@@ -691,15 +578,17 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def osds_pgs_above_max(self):
+        """ Return OSDs whose PG count exceeds the maximum limit. """
         _osds_pgs = {}
         for osd, num_pgs in self.osds_pgs.items():
-            if num_pgs > self.OSD_PG_MAX_LIMIT:
+            if num_pgs > self.osd_pg_max_limit:
                 _osds_pgs[osd] = num_pgs
 
         return sorted_dict(_osds_pgs, key=lambda e: e[1], reverse=True)
 
     @cached_property
     def osds_pgs_suboptimal(self):
+        """ Return OSDs with PG counts outside the optimal range. """
         _osds_pgs = {}
         if not self.osd_df_tree:
             return _osds_pgs
@@ -725,6 +614,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def ssds_using_bcache(self):
+        """ Return SSD-backed OSD ids that use bcache devices. """
         report = CLIHelper().ceph_report_json_decoded()
         if not report:
             return []
@@ -759,6 +649,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def osd_raw_usage_higher_than_data(self):
+        """ Return OSDs where raw usage exceeds tracked data. """
         _bad_osds = []
 
         if not self.osd_df_tree:
@@ -797,3 +688,43 @@ class CephCluster():  # pylint: disable=too-many-public-methods
                 _bad_osds.append(osd['name'])
 
         return sorted(_bad_osds)
+
+    @cached_property
+    def mixed_size_osd_device_classes(self):
+        """Return device classes that contain OSDs with mixed sizes.
+
+        Groups OSDs by device class and checks whether the smallest and
+        largest OSD within each class differ by more than
+        OSD_MIXED_SIZE_THRESHOLD_PERCENT.  Returns a list of strings
+        describing the affected classes and size ranges.
+        """
+        if not self.osd_df_tree:
+            return []
+
+        # Collect sizes per device class
+        class_sizes = {}
+        for osd in self.osd_df_tree['nodes']:
+            if osd['id'] < 0:
+                continue
+            device_class = osd.get('device_class')
+            if not device_class:
+                continue
+            kb = osd.get('kb', 0)
+            if kb <= 0:
+                continue
+            class_sizes.setdefault(device_class, []).append(kb)
+
+        results = []
+        threshold = OSD_MIXED_SIZE_THRESHOLD_PERCENT / 100.0
+        for device_class, sizes in sorted(class_sizes.items()):
+            if len(sizes) < 2:
+                continue
+            min_size = min(sizes)
+            max_size = max(sizes)
+            if (max_size - min_size) > (min_size * threshold):
+                min_tb = round(min_size / (1024 * 1024 * 1024), 2)
+                max_tb = round(max_size / (1024 * 1024 * 1024), 2)
+                results.append(
+                    f"'{device_class}' ({min_tb} TiB - {max_tb} TiB)")
+
+        return results
