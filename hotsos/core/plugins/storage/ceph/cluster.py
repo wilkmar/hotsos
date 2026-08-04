@@ -51,6 +51,7 @@ class CephCluster():  # pylint: disable=too-many-public-methods
 
     @cached_property
     def ceph_config_dump(self):
+        """ Return decoded JSON from ceph config dump. """
         return CLIHelper().ceph_config_dump_json_decoded() or []
 
     @cached_property

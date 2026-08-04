@@ -104,6 +104,7 @@ class TestCephPluginDeps(CephCommonTestsBase):
 class TestCephChecks(CephCommonTestsBase):
     """ Unit tests for ceph checks. """
     def test_mds_balancer_disabled_by_interval(self):
+        """Test mds balancer disabled by interval."""
         cases = [
             ('mds config dump',
              [{'name': 'mds_bal_interval',
@@ -131,6 +132,7 @@ class TestCephChecks(CephCommonTestsBase):
                 self.assertEqual(checks.mds_balancer_disabled, expected)
 
     def test_mds_balancer_disabled_by_balance_automate(self):
+        """Test mds balancer disabled by balance_automate flag."""
         cases = [
             ('disabled for all filesystems',
              [{'mdsmap': {'flags_state': {'balance_automate': False}}},
