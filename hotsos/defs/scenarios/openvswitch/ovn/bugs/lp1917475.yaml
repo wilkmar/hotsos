@@ -11,4 +11,7 @@ conclusions:
     raises:
       type: LaunchpadBug
       bug-id: 1917475
-      message: known ovn bug identified - db rbac errors
+      message: >-
+        ovn-controller on this host is hitting known bug LP1917475, which causes
+        OVN database RBAC permission errors on transactions. Upgrade OVN to the
+        latest version; see the bug for details.

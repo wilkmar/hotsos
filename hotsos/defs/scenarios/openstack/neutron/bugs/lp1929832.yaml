@@ -10,4 +10,6 @@ conclusions:
       type: LaunchpadBug
       bug-id: 1929832
       message: >-
-        Known neutron l3-agent bug identified that impacts deletion of neutron routers.
+        The neutron l3-agent on this host is affected by known bug LP1929832,
+        which prevents neutron routers from being deleted correctly. Upgrade
+        neutron to the latest version; see the bug for details.

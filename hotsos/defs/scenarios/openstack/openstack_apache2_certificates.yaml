@@ -10,7 +10,8 @@ conclusions:
       type: OpenstackWarning
       message: >-
         The following certificates will expire in less than {apache2-certificates-days-to-expire} days:
-        {apache2-certificates-path}
+        {apache2-certificates-path}. Renew these certificates before they expire
+        to avoid Apache2/TLS service disruption.
       format-dict:
         apache2-certificates-path: '@checks.apache2_certificate_expiring.requires.value_actual:comma_join'
         apache2-certificates-days-to-expire: 'hotsos.core.plugins.openstack.ApacheInfo.certificate_expire_days'

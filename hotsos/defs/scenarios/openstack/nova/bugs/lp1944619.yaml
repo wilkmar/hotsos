@@ -10,4 +10,9 @@ conclusions:
     raises:
       type: LaunchpadBug
       bug-id: 1944619
-      message: known nova bug identified
+      message: >-
+        This host is affected by Nova bug LP1944619: after a failed live
+        migration of an instance with a hardware-offloaded OVS port, the PCI
+        device is left in use by QEMU and the instance loses network
+        connectivity. Upgrade Nova to the latest version and see the bug
+        report for details.

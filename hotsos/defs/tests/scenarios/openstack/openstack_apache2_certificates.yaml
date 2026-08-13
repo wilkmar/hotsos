@@ -130,4 +130,4 @@ data-root:
       Thu Dec 12 16:19:17 UTC 2023
 raised-issues:
   OpenstackWarning: >-
-    The following certificates will expire in less than 60 days: etc/apache2/ssl/keystone/cert_10.5.100.2
+    The following certificates will expire in less than 60 days: etc/apache2/ssl/keystone/cert_10.5.100.2. Renew these certificates before they expire to avoid Apache2/TLS service disruption.

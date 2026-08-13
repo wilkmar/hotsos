@@ -13,6 +13,7 @@ data-root:
     # yamllint enable rule:trailing-spaces
 raised-issues:
   OpenstackWarning: >-
-    This node is running Openstack nova-compute and Masakari but
-    pacemaker_remote.service is not currently enabled and is a
-    requirement for Masakari to function correctly.
+    This node is running OpenStack nova-compute and Masakari but the
+    required pacemaker_remote.service is not enabled, so Masakari host
+    monitoring cannot function. Enable and start pacemaker_remote.service on
+    this node.

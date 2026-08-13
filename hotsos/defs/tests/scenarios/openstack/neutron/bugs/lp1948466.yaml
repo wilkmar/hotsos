@@ -7,5 +7,7 @@ data-root:
     - uptime
 raised-bugs:
   https://bugs.launchpad.net/bugs/1948466: >-
-    Known neutron-server bug identified that impacts deletion of neutron
-    subnets from the OVN database via the maintenance task.
+    neutron-server on this host is affected by known bug LP1948466, where
+    the maintenance task fails to delete neutron subnets from the OVN
+    database. Upgrade neutron to the latest version; see the bug for
+    details.

@@ -7,6 +7,7 @@ data-root:
       ii nova-compute 2:21.2.1-0ubuntu1 all
 raised-issues:
   OpenstackWarning: >-
-    This node is running Openstack nova-compute and Masakari but
-    pacemaker-remote is not currently installed and is a
-    requirement for Masakari to function correctly.
+    This node is running OpenStack nova-compute and Masakari but the
+    required pacemaker-remote package is not installed, so Masakari host
+    monitoring cannot function. Install and enable pacemaker-remote on this
+    node.

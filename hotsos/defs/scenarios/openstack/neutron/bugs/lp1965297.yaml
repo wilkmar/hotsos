@@ -10,5 +10,6 @@ conclusions:
       type: LaunchpadBug
       bug-id: 1965297
       message: >-
-        known neutron l3-agent bug identified that impacts HA routers and can
-        cause router updates to stall.
+        The neutron l3-agent on this host is affected by known bug LP1965297,
+        which impacts HA routers and can cause router updates to stall. Upgrade
+        neutron to the latest version; see the bug for details.

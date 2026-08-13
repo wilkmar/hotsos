@@ -11,5 +11,7 @@ conclusions:
       type: LaunchpadBug
       bug-id: 1860743
       message: >-
-        known nova compute charm bug identified which affects live migrations
-        with cached keys
+        The nova-compute charm on this host is affected by known bug LP1860743,
+        which breaks live migrations when stale SSH host keys are cached.
+        Upgrade the nova-compute charm to the latest version; see the bug for
+        details.

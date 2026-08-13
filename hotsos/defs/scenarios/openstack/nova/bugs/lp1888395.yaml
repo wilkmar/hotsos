@@ -21,4 +21,9 @@ conclusions:
     raises:
       type: LaunchpadBug
       bug-id: 1888395
-      message: known nova bug identified
+      message: >-
+        This host is running a version of Nova affected by bug LP1888395, which
+        raises "NotImplementedError: Cannot load 'vif_type' in the base class"
+        in nova-compute and can prevent affected instances from booting or
+        migrating. Upgrade nova-common to the latest version and see the bug report
+        for details.
