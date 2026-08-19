@@ -1,3 +1,4 @@
+import multiprocessing
 import os
 from datetime import timedelta
 from functools import cached_property
@@ -15,6 +16,19 @@ from searchkit.constraints import (
 from hotsos.core.config import HotSOSConfig
 from hotsos.core.host_helpers import CLIHelper, UptimeHelper
 from hotsos.core.log import log
+
+
+# NOTE: searchkit's parallel search relies on the 'fork' multiprocessing start
+# method - its worker processes inherit global state (e.g. HotSOSConfig) from
+# the parent and it explicitly identifies its workers as ForkProcess. From
+# Python 3.14 the default start method on Linux changed from 'fork' to
+# 'forkserver' which breaks this: workers no longer inherit HotSOSConfig so
+# search constraints (e.g. result age limiting) get silently skipped and
+# search results can be corrupted. We therefore ensure 'fork' is used where
+# available (all platforms hotsos supports).
+if 'fork' in multiprocessing.get_all_start_methods():
+    if multiprocessing.get_start_method(allow_none=True) != 'fork':
+        multiprocessing.set_start_method('fork', force=True)
 
 
 # This module acts as a proxy to searchkit but with some addons/modifications
